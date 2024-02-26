@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solana Transaction Decoder</title>
+    <script src="https://cdn.jsdelivr.net/npm/base-58@0.0.1/Base58.min.js"></script>
+</head>
+
+<body>
+    <h1>Solana Transaction Decoder</h1>
+    <p>Raw Transaction: (base58/base64/hex)</p>
+    <textarea id="rawTx" cols="30" rows="10"></textarea>
+    <p><button onclick="decodeTx()">DECODE</button></p>
+    <p id="decodeResult"></p>
+    <br>
+    <p>
+        Author: <a href="https://github.com/naiba" target="_blank">naiba</a>
+    </p>
+    <script>
+        const hexToByte = (hex) => {
+            const key = '0123456789abcdef'
+            let newBytes = []
+            let currentChar = 0
+            let currentByte = 0
+            for (let i = 0; i < hex.length; i++) {   // Go over two 4-bit hex chars to convert into one 8-bit byte
+                currentChar = key.indexOf(hex[i])
+                if (i % 2 === 0) { // First hex char
+                    currentByte = (currentChar << 4) // Get 4-bits from first hex char
+                }
+                if (i % 2 === 1) { // Second hex char
+                    currentByte += (currentChar)     // Concat 4-bits from second hex char
+                    newBytes.push(currentByte)       // Add byte
+                }
+            }
+            return new Uint8Array(newBytes)
+        }
+        const byteToHex = (byte) => {
+            const key = '0123456789abcdef'
+            let bytes = new Uint8Array(byte)
+            let newHex = ''
+            let currentChar = 0
+            for (let i = 0; i < bytes.length; i++) { // Go over each 8-bit byte
+                currentChar = (bytes[i] >> 4)      // First 4-bits for first hex char
+                newHex += key[currentChar]         // Add first hex char to string
+                currentChar = (bytes[i] & 15)      // Erase first 4-bits, get last 4-bits for second hex char
+                newHex += key[currentChar]         // Add second hex char to string
+            }
+            return newHex
+        }
+        function decodeBytes(b) {
+            const tx = {}
+            let readIndex = 0;
+            tx['root.signature.length'] = b[readIndex++];
+            for (let i = 0; i < tx['root.signature.length']; i++) {
+                tx['root.signature.' + i] = byteToHex(b.slice(readIndex, readIndex + 64))
+                readIndex += 64;
+            }
+            tx['root.message.header.numRequiredSignatures'] = b[readIndex++];
+            if (!tx['root.message.header.numRequiredSignatures']) {
+                throw new Error('Invalid Transaction');
+            }
+            tx['root.message.header.numReadonlySignedAccounts'] = b[readIndex++];
+            tx['root.message.header.numReadonlyUnsignedAccounts'] = b[readIndex++];
+            tx['root.message.header.accountKeys.length'] = b[readIndex++];
+            for (let i = 0; i < tx['root.message.header.accountKeys.length']; i++) {
+                tx['root.message.header.accountKeys.' + i] = Base58.encode(b.slice(readIndex, readIndex + 32));
+                readIndex += 32;
+            }
+            tx['root.message.header.recentBlockhash'] = byteToHex(b.slice(readIndex, readIndex + 32));
+            readIndex += 32;
+            tx['root.message.instructions.length'] = b[readIndex++];
+            for (let i = 0; i < tx['root.message.instructions.length']; i++) {
+                const instructionsId = 'root.message.instructions.' + i;
+                tx[instructionsId + '.programIdIndex'] = b[readIndex++];
+                tx[instructionsId + '.accounts.length'] = b[readIndex++];
+                for (let j = 0; j < tx[instructionsId + '.accounts.length']; j++) {
+                    tx[instructionsId + '.accounts.' + j + '.index'] = b[readIndex++];
+                }
+                tx[instructionsId + '.data.length'] = b[readIndex++];
+                tx[instructionsId + '.data'] = byteToHex(b.slice(readIndex, readIndex + tx[instructionsId + '.data.length']));
+                readIndex += tx[instructionsId + '.data.length']
+            }
+            return tx;
+        }
+        function decodeBase64Tx(rawTx) {
+            try {
+                const txBytes = atob(rawTx);
+                return decodeBytes(Uint8Array.from(txBytes, (m) => m.codePointAt(0)));
+            } catch (error) {
+                return null;
+            }
+        }
+        function decodeBase58Tx(rawTx) {
+            try {
+                const txBytes = Base58.decode(rawTx);
+                return decodeBytes(txBytes);
+            } catch (error) {
+                return null;
+            }
+        }
+        function decodeHexTx(rawTx) {
+            try {
+                const txBytes = hexToByte(rawTx);
+                return decodeBytes(txBytes);
+            } catch (error) {
+                return null;
+            }
+        }
+        function decodeTx() {
+            var rawTxVal = rawTx.value;
+            const parsers = [
+                decodeBase64Tx,
+                decodeBase58Tx,
+                decodeHexTx
+            ];
+            decodeResult.innerHTML = '';
+            for (let i = 0; i < parsers.length; i++) {
+                const parser = parsers[i];
+                const tx = parser(rawTxVal);
+                if (tx) {
+                    let result = 'Raw Transaction: ' + rawTxVal + '<br><br>';
+                    result += 'Decoded Transaction: <br>';
+                    Object.keys(tx).forEach(key => {
+                        result += key + ': ' + tx[key] + '<br>';
+                    });
+                    decodeResult.innerHTML = result;
+                    break;
+                }
+            }
+            if (decodeResult.innerHTML === '') {
+                decodeResult.innerHTML = 'Invalid Transaction';
+            }
+        }
+    </script>
+</body>
+
+</html>
